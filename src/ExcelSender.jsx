@@ -1,6 +1,6 @@
-
 // // src/ExcelSender.jsx
 // import { useMemo, useState, useCallback } from "react";
+// import { toast } from "sonner";
 
 // export default function ExcelSender() {
 //   // ======================
@@ -32,6 +32,7 @@
 //   const [fileProductos, setFileProductos] = useState(null);
 //   const [loading, setLoading] = useState(false);
 //   const [error, setError] = useState("");
+//   const [errorDetails, setErrorDetails] = useState(null);
 //   const [result, setResult] = useState(null);
 
 //   const baseUrl = useMemo(() => {
@@ -53,16 +54,112 @@
 //     !!fileProductos && !!companyId && !!priceListId && !!subsidiaryId && !loading;
 
 //   // ======================
+//   // FUNCIÓN PARA ANALIZAR ERRORES
+//   // ======================
+//   const parseError = (errorMessage, statusCode) => {
+//     const errors = {
+//       // Errores de validación
+//       "invalid excel": "El archivo Excel tiene un formato inválido",
+//       "invalid format": "Formato de archivo no soportado",
+//       "missing columns": "Faltan columnas requeridas en el Excel",
+//       "company not found": "El Company ID no existe en el sistema",
+//       "pricelist not found":
+//         "El PriceList ID no existe o no pertenece a esta compañía",
+//       "subsidiary not found":
+//         "El Subsidiary ID no existe o no pertenece a esta compañía",
+//       "warehouse not found": "El Warehouse ID no existe",
+
+//       // Errores de producto
+//       "product not found": "Uno o más productos no existen en el sistema",
+//       "sku already exists": "El SKU del producto ya está registrado",
+//       "invalid price": "El precio del producto es inválido",
+//       "invalid stock": "La cantidad de stock es inválida",
+//       "product creation failed": "Error al crear el producto",
+//       "product update failed": "Error al actualizar el producto",
+
+//       // Errores del sistema
+//       "database error": "Error en la base de datos",
+//       "server error": "Error interno del servidor",
+//       "timeout": "La operación tardó demasiado tiempo",
+//       "network error": "Error de conexión de red",
+//     };
+
+//     const errorLower = String(errorMessage || "").toLowerCase();
+//     let foundError = null;
+
+//     for (const [key, description] of Object.entries(errors)) {
+//       if (errorLower.includes(key)) {
+//         foundError = { type: key, description, details: errorMessage };
+//         break;
+//       }
+//     }
+
+//     if (!foundError) {
+//       foundError = {
+//         type: "unknown",
+//         description: "Error desconocido",
+//         details: errorMessage,
+//       };
+//     }
+
+//     if (statusCode) {
+//       foundError.statusCode = statusCode;
+//       foundError.statusText = getStatusText(statusCode);
+//     }
+
+//     return foundError;
+//   };
+
+//   const getStatusText = (statusCode) => {
+//     const statusMap = {
+//       400: "Bad Request - La solicitud tiene errores",
+//       401: "Unauthorized - No autorizado",
+//       403: "Forbidden - Acceso prohibido",
+//       404: "Not Found - Recurso no encontrado",
+//       413: "Payload Too Large - Archivo muy grande",
+//       422: "Unprocessable Entity - Error de validación",
+//       500: "Internal Server Error - Error del servidor",
+//       502: "Bad Gateway - Error de gateway",
+//       503: "Service Unavailable - Servicio no disponible",
+//       504: "Gateway Timeout - Tiempo de espera agotado",
+//     };
+//     return statusMap[statusCode] || `Código de error: ${statusCode}`;
+//   };
+
+//   // ======================
 //   // SEND
 //   // ======================
 //   const onSend = async () => {
 //     setError("");
+//     setErrorDetails(null);
 //     setResult(null);
 
-//     if (!fileProductos) return setError("Selecciona el archivo Excel (.xlsx o .xls).");
-//     if (!companyId || !priceListId || !subsidiaryId) {
-//       return setError("Completa Company ID, PriceList ID y Subsidiary ID.");
+//     // Validaciones previas
+//     if (!fileProductos) {
+//       toast.error("Selecciona el archivo Excel");
+//       setError("❌ Selecciona el archivo Excel (.xlsx o .xls).");
+//       return;
 //     }
+
+//     if (!companyId || !priceListId || !subsidiaryId) {
+//       const missing = [];
+//       if (!companyId) missing.push("Company ID");
+//       if (!priceListId) missing.push("PriceList ID");
+//       if (!subsidiaryId) missing.push("Subsidiary ID");
+
+//       toast.warning(`Completa: ${missing.join(", ")}`);
+//       setError(`⚠️ Completa los campos obligatorios: ${missing.join(", ")}`);
+//       return;
+//     }
+
+//     // Validar formato del archivo
+//     const fileName = fileProductos.name.toLowerCase();
+//     if (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls")) {
+//       toast.error("Formato inválido: debe ser .xlsx o .xls");
+//       setError("❌ El archivo debe ser un Excel (.xlsx o .xls)");
+//       return;
+//     }
+
 
 //     try {
 //       setLoading(true);
@@ -74,21 +171,113 @@
 //       form.append("flagUseSimpleBrand", String(flagUseSimpleBrand));
 //       if (idWarehouse) form.append("idWarehouse", idWarehouse);
 
-//       const res = await fetch(buildEndpoint(), { method: "POST", body: form });
+//       const endpoint = buildEndpoint();
+//       const res = await fetch(endpoint, { method: "POST", body: form });
 
 //       const text = await res.text();
-//       if (!res.ok) throw new Error(text);
 
+//       if (!res.ok) {
+//         const parsedError = parseError(text, res.status);
+//         setErrorDetails(parsedError);
+
+//         let userMessage = `❌ Error ${res.status}: ${parsedError.description}`;
+
+//         if (res.status === 404) {
+//           userMessage +=
+//             "\n\nPosibles causas:\n• Los IDs ingresados no existen\n• El nodo seleccionado es incorrecto\n• La ruta API ha cambiado";
+//         } else if (res.status === 422) {
+//           userMessage +=
+//             "\n\nRevisa:\n• El formato del archivo Excel\n• Las columnas requeridas\n• Los tipos de datos en cada columna";
+//         } else if (res.status === 500) {
+//           userMessage +=
+//             "\n\nEl servidor tuvo un problema interno. Intenta de nuevo o contacta al administrador.";
+//         }
+
+//         setError(userMessage);
+
+//         // ✅ toast SOLO al final (cuando ya falló)
+//         toast.error(`Error ${res.status}: ${parsedError.description}`);
+
+//         throw new Error(text);
+//       }
+
+//       // OK: intentar parsear JSON
 //       try {
-//         setResult(JSON.parse(text));
+//         const jsonResult = JSON.parse(text);
+//         setResult(jsonResult);
+
+//         const okCount = Number(
+//           jsonResult?.success ??
+//             jsonResult?.data?.n_products ??
+//             jsonResult?.n_products ??
+//             0
+//         );
+
+//         const errCount = Array.isArray(jsonResult?.errors)
+//           ? jsonResult.errors.length
+//           : 0;
+
+//         if (errCount > 0) {
+//           setErrorDetails({
+//             type: "product_errors",
+//             description: "Errores en productos específicos",
+//             details: jsonResult.errors,
+//             successCount: okCount,
+//             errorCount: errCount,
+//           });
+
+//           setError(
+//             `⚠️ Se procesaron ${okCount} productos, pero ${errCount} tuvieron errores. Revisa los detalles abajo.`
+//           );
+
+//           // ✅ toast SOLO al final (cuando ya terminó)
+//           toast.warning(`Procesado: ${okCount} OK, ${errCount} con error`);
+//         } else {
+//           setError("");
+
+//           // ✅ toast SOLO al final (cuando ya terminó)
+//           toast.success(`✅ Productos subidos: ${okCount}`);
+//         }
 //       } catch {
+//         // Respuesta no-JSON (texto/HTML)
 //         setResult(text);
+//         setError(
+//           `✅ Respuesta del servidor: ${text.substring(0, 100)}${
+//             text.length > 100 ? "..." : ""
+//           }`
+//         );
+
+//         // ✅ toast SOLO al final
+//         toast.success("✅ Envío completado");
 //       }
 //     } catch (e) {
-//       setError(e?.message || "Error enviando el archivo");
-//     } finally {
-//       setLoading(false);
+//       const msg = String(e?.message || "");
+
+//       if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+//         const m =
+//           "🌐 Error de conexión:\n\n• Verifica tu conexión a internet\n• El servidor del nodo podría estar caído\n• Revisa si hay problemas con CORS\n\nEndpoint: " +
+//           buildEndpoint();
+
+//         setError(m);
+
+//         // ✅ toast SOLO al final (cuando ya falló)
+//         toast.error("🌐 Error de conexión con el servidor");
+//         return;
+//       }
+
+//       if (!errorDetails) {
+//         const parsedError = parseError(msg || "Error desconocido");
+//         setErrorDetails(parsedError);
+//       }
+
+//       // ✅ toast SOLO al final
+//       toast.error("❌ No se pudo enviar el Excel");
+
+//       if (!error) {
+//         setError("❌ Error enviando el archivo: " + (msg || "Error desconocido"));
+//       }
 //     }
+
 //   };
 
 //   // ======================
@@ -159,7 +348,9 @@
 //               {/* Parámetros */}
 //               <div>
 //                 <div className="mb-2 flex items-center justify-between">
-//                   <label className="text-sm font-medium text-slate-700">Parámetros</label>
+//                   <label className="text-sm font-medium text-slate-700">
+//                     Parámetros
+//                   </label>
 //                   <span className="text-xs text-slate-500">Form-data</span>
 //                 </div>
 
@@ -170,13 +361,10 @@
 //                     value={idCountry}
 //                     onChange={setIdCountry}
 //                   />
-
-
-//                   <TaxCodeSelect value={taxCodeCountry} onChange={setTaxCodeCountry} />
-
-
-
-
+//                   <TaxCodeSelect
+//                     value={taxCodeCountry}
+//                     onChange={setTaxCodeCountry}
+//                   />
 //                   <Field
 //                     label="idWarehouse (opcional)"
 //                     placeholder="Ej: 5712"
@@ -253,24 +441,140 @@
 //                 </label>
 //               </div>
 
-//               {/* Error */}
+//               {/* Error principal */}
 //               {error && (
-//                 <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-//                   <div className="mt-0.5 text-red-700">
-//                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-//                       <path
-//                         d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
-//                         stroke="currentColor"
-//                         strokeWidth="2"
-//                         strokeLinecap="round"
-//                         strokeLinejoin="round"
-//                       />
-//                     </svg>
+//                 <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+//                   <div className="flex items-start gap-3">
+//                     <div className="mt-0.5 text-red-700">
+//                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+//                         <path
+//                           d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+//                           stroke="currentColor"
+//                           strokeWidth="2"
+//                           strokeLinecap="round"
+//                           strokeLinejoin="round"
+//                         />
+//                       </svg>
+//                     </div>
+//                     <div className="flex-1">
+//                       <div className="text-sm font-semibold text-red-800">Mensaje</div>
+//                       <div className="mt-1 whitespace-pre-wrap text-sm text-red-700">{error}</div>
+
+//                       {/* Botón para copiar error */}
+//                       {errorDetails && (
+//                         <button
+//                           onClick={() => {
+//                             const textToCopy = `Error: ${error}\n\nDetalles: ${JSON.stringify(
+//                               errorDetails,
+//                               null,
+//                               2
+//                             )}\n\nEndpoint: ${buildEndpoint()}`;
+//                             navigator.clipboard.writeText(textToCopy);
+//                             toast.success("Copiado al portapapeles");
+//                           }}
+//                           className="mt-2 inline-flex items-center gap-1 rounded-lg bg-red-100 px-3 py-1 text-xs font-medium text-red-800 hover:bg-red-200"
+//                         >
+//                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+//                             <path
+//                               d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1M8 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M8 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"
+//                               stroke="currentColor"
+//                               strokeWidth="2"
+//                               strokeLinecap="round"
+//                               strokeLinejoin="round"
+//                             />
+//                           </svg>
+//                           Copiar detalles del error
+//                         </button>
+//                       )}
+//                     </div>
 //                   </div>
-//                   <div>
-//                     <div className="text-sm font-semibold text-red-800">Error</div>
-//                     <div className="text-sm text-red-700">{error}</div>
-//                   </div>
+
+//                   {/* Detalles del error expandibles */}
+//                   {errorDetails && (
+//                     <div className="mt-4 border-t border-red-200 pt-4">
+//                       <details className="group">
+//                         <summary className="flex cursor-pointer items-center justify-between text-sm font-medium text-red-800">
+//                           <span>Detalles técnicos del error</span>
+//                           <svg
+//                             className="h-4 w-4 transition-transform group-open:rotate-180"
+//                             viewBox="0 0 24 24"
+//                             fill="none"
+//                           >
+//                             <path
+//                               d="M6 9l6 6 6-6"
+//                               stroke="currentColor"
+//                               strokeWidth="2"
+//                               strokeLinecap="round"
+//                               strokeLinejoin="round"
+//                             />
+//                           </svg>
+//                         </summary>
+//                         <div className="mt-2 rounded-lg bg-red-100 p-3">
+//                           <div className="space-y-2 text-xs">
+//                             {errorDetails.statusCode && (
+//                               <div className="flex justify-between">
+//                                 <span className="font-medium">Código de estado:</span>
+//                                 <span className="font-mono">
+//                                   {errorDetails.statusCode} - {errorDetails.statusText}
+//                                 </span>
+//                               </div>
+//                             )}
+//                             {errorDetails.type && (
+//                               <div className="flex justify-between">
+//                                 <span className="font-medium">Tipo de error:</span>
+//                                 <span className="font-mono">{errorDetails.type}</span>
+//                               </div>
+//                             )}
+//                             {errorDetails.description && (
+//                               <div className="flex justify-between">
+//                                 <span className="font-medium">Descripción:</span>
+//                                 <span>{errorDetails.description}</span>
+//                               </div>
+//                             )}
+//                             {errorDetails.successCount !== undefined && (
+//                               <div className="flex justify-between">
+//                                 <span className="font-medium">Productos exitosos:</span>
+//                                 <span className="text-green-600">{errorDetails.successCount}</span>
+//                               </div>
+//                             )}
+//                             {errorDetails.errorCount !== undefined && (
+//                               <div className="flex justify-between">
+//                                 <span className="font-medium">Productos con error:</span>
+//                                 <span className="text-red-600">{errorDetails.errorCount}</span>
+//                               </div>
+//                             )}
+
+//                             {errorDetails.details && Array.isArray(errorDetails.details) && (
+//                               <div className="mt-3">
+//                                 <div className="font-medium">Errores por producto:</div>
+//                                 <div className="mt-1 max-h-40 overflow-y-auto">
+//                                   {errorDetails.details.map((err, idx) => (
+//                                     <div
+//                                       key={idx}
+//                                       className="mt-1 rounded border border-red-200 bg-white p-2"
+//                                     >
+//                                       <div className="font-mono text-xs">
+//                                         {JSON.stringify(err, null, 2)}
+//                                       </div>
+//                                     </div>
+//                                   ))}
+//                                 </div>
+//                               </div>
+//                             )}
+
+//                             {errorDetails.details && typeof errorDetails.details === "string" && (
+//                               <div className="mt-3">
+//                                 <div className="font-medium">Mensaje original:</div>
+//                                 <div className="mt-1 rounded border border-red-200 bg-white p-2 font-mono text-xs">
+//                                   {errorDetails.details}
+//                                 </div>
+//                               </div>
+//                             )}
+//                           </div>
+//                         </div>
+//                       </details>
+//                     </div>
+//                   )}
 //                 </div>
 //               )}
 
@@ -281,9 +585,7 @@
 //                   onClick={onSend}
 //                   disabled={!canSend}
 //                   className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition md:w-auto ${
-//                     canSend
-//                       ? "bg-slate-900 hover:bg-slate-800"
-//                       : "bg-slate-300 cursor-not-allowed"
+//                     canSend ? "bg-slate-900 hover:bg-slate-800" : "bg-slate-300 cursor-not-allowed"
 //                   }`}
 //                 >
 //                   {loading ? (
@@ -355,23 +657,46 @@
 
 //             <div className="p-6">
 //               {result ? (
-//                 <pre className="max-h-[560px] overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800">
-//                   {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
-//                 </pre>
+//                 <div>
+//                   <pre className="max-h-[560px] overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800">
+//                     {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
+//                   </pre>
+
+//                   <button
+//                     onClick={() => {
+//                       const textToCopy =
+//                         typeof result === "string" ? result : JSON.stringify(result, null, 2);
+//                       navigator.clipboard.writeText(textToCopy);
+//                       toast.success("Respuesta copiada");
+//                     }}
+//                     className="mt-3 inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-800 hover:bg-slate-200"
+//                   >
+//                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+//                       <path
+//                         d="M8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1M8 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M8 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2"
+//                         stroke="currentColor"
+//                         strokeWidth="2"
+//                         strokeLinecap="round"
+//                         strokeLinejoin="round"
+//                       />
+//                     </svg>
+//                     Copiar respuesta completa
+//                   </button>
+//                 </div>
 //               ) : (
 //                 <EmptyState />
 //               )}
 //             </div>
 //           </div>
 
-//           {/* Tips */}
 //           <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
 //             <div className="text-sm font-semibold text-slate-900">Recomendaciones</div>
 //             <ul className="mt-3 space-y-2 text-sm text-slate-600">
 //               <li className="flex gap-2">
 //                 <Dot />
 //                 <span>
-//                   Si el cliente tiene 1 sola tienda, deja <span className="font-mono">idWarehouse</span> vacío.
+//                   Si el cliente tiene 1 sola tienda, deja <span className="font-mono">idWarehouse</span>{" "}
+//                   vacío.
 //                 </span>
 //               </li>
 //               <li className="flex gap-2">
@@ -383,8 +708,12 @@
 //               <li className="flex gap-2">
 //                 <Dot />
 //                 <span>
-//                   Si sale error 4xx/5xx, revisa los IDs y el nodo.
+//                   Si sale error, usa el botón "Copiar detalles" para enviar al soporte.
 //                 </span>
+//               </li>
+//               <li className="flex gap-2">
+//                 <Dot />
+//                 <span>Para errores 404, verifica que los IDs existen en el nodo correcto.</span>
 //               </li>
 //             </ul>
 //           </div>
@@ -416,14 +745,7 @@
 // function Spinner() {
 //   return (
 //     <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-//       <circle
-//         className="opacity-25"
-//         cx="12"
-//         cy="12"
-//         r="10"
-//         stroke="currentColor"
-//         strokeWidth="4"
-//       />
+//       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
 //       <path
 //         className="opacity-75"
 //         d="M4 12a8 8 0 0 1 8-8"
@@ -453,9 +775,7 @@
 //           <path d="M15 3v5h5" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
 //         </svg>
 //       </div>
-//       <div className="mt-3 text-sm font-semibold text-slate-900">
-//         Sin resultados todavía
-//       </div>
+//       <div className="mt-3 text-sm font-semibold text-slate-900">Sin resultados todavía</div>
 //       <div className="mt-1 text-sm text-slate-600">
 //         Cuando envíes el Excel, aquí se mostrará la respuesta del servidor.
 //       </div>
@@ -477,17 +797,15 @@
 //         <option value="02">02 — Exonerado</option>
 //       </select>
 
-//       <div className="text-xs text-slate-500">
-//         Selecciona el código tributario a enviar al backend.
-//       </div>
+//       <div className="text-xs text-slate-500">Selecciona el código tributario a enviar al backend.</div>
 //     </div>
 //   );
 // }
 
 
-
 // src/ExcelSender.jsx
 import { useMemo, useState, useCallback } from "react";
+import { toast } from "sonner";
 
 export default function ExcelSender() {
   // ======================
@@ -518,8 +836,12 @@ export default function ExcelSender() {
 
   const [fileProductos, setFileProductos] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  // "error" solo para errores (caja roja)
   const [error, setError] = useState("");
   const [errorDetails, setErrorDetails] = useState(null);
+
+  // Respuesta del servidor (panel derecho)
   const [result, setResult] = useState(null);
 
   const baseUrl = useMemo(() => {
@@ -550,10 +872,12 @@ export default function ExcelSender() {
       "invalid format": "Formato de archivo no soportado",
       "missing columns": "Faltan columnas requeridas en el Excel",
       "company not found": "El Company ID no existe en el sistema",
-      "pricelist not found": "El PriceList ID no existe o no pertenece a esta compañía",
-      "subsidiary not found": "El Subsidiary ID no existe o no pertenece a esta compañía",
+      "pricelist not found":
+        "El PriceList ID no existe o no pertenece a esta compañía",
+      "subsidiary not found":
+        "El Subsidiary ID no existe o no pertenece a esta compañía",
       "warehouse not found": "El Warehouse ID no existe",
-      
+
       // Errores de producto
       "product not found": "Uno o más productos no existen en el sistema",
       "sku already exists": "El SKU del producto ya está registrado",
@@ -561,7 +885,7 @@ export default function ExcelSender() {
       "invalid stock": "La cantidad de stock es inválida",
       "product creation failed": "Error al crear el producto",
       "product update failed": "Error al actualizar el producto",
-      
+
       // Errores del sistema
       "database error": "Error en la base de datos",
       "server error": "Error interno del servidor",
@@ -569,10 +893,9 @@ export default function ExcelSender() {
       "network error": "Error de conexión de red",
     };
 
-    // Buscar errores conocidos
-    const errorLower = errorMessage.toLowerCase();
+    const errorLower = String(errorMessage || "").toLowerCase();
     let foundError = null;
-    
+
     for (const [key, description] of Object.entries(errors)) {
       if (errorLower.includes(key)) {
         foundError = { type: key, description, details: errorMessage };
@@ -580,16 +903,14 @@ export default function ExcelSender() {
       }
     }
 
-    // Si no se encuentra error conocido, usar el mensaje original
     if (!foundError) {
-      foundError = { 
-        type: "unknown", 
-        description: "Error desconocido", 
-        details: errorMessage 
+      foundError = {
+        type: "unknown",
+        description: "Error desconocido",
+        details: errorMessage,
       };
     }
 
-    // Agregar información del código de estado
     if (statusCode) {
       foundError.statusCode = statusCode;
       foundError.statusText = getStatusText(statusCode);
@@ -624,23 +945,26 @@ export default function ExcelSender() {
 
     // Validaciones previas
     if (!fileProductos) {
+      toast.error("Selecciona el archivo Excel");
       setError("❌ Selecciona el archivo Excel (.xlsx o .xls).");
       return;
     }
-    
+
     if (!companyId || !priceListId || !subsidiaryId) {
       const missing = [];
       if (!companyId) missing.push("Company ID");
       if (!priceListId) missing.push("PriceList ID");
       if (!subsidiaryId) missing.push("Subsidiary ID");
-      
+
+      toast.warning(`Completa: ${missing.join(", ")}`);
       setError(`⚠️ Completa los campos obligatorios: ${missing.join(", ")}`);
       return;
     }
 
     // Validar formato del archivo
     const fileName = fileProductos.name.toLowerCase();
-    if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+    if (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls")) {
+      toast.error("Formato inválido: debe ser .xlsx o .xls");
       setError("❌ El archivo debe ser un Excel (.xlsx o .xls)");
       return;
     }
@@ -659,61 +983,101 @@ export default function ExcelSender() {
       const res = await fetch(endpoint, { method: "POST", body: form });
 
       const text = await res.text();
-      
+
       if (!res.ok) {
         const parsedError = parseError(text, res.status);
         setErrorDetails(parsedError);
-        
-        // Mensaje amigable para el usuario
+
         let userMessage = `❌ Error ${res.status}: ${parsedError.description}`;
-        
+
         if (res.status === 404) {
-          userMessage += "\n\nPosibles causas:\n• Los IDs ingresados no existen\n• El nodo seleccionado es incorrecto\n• La ruta API ha cambiado";
+          userMessage +=
+            "\n\nPosibles causas:\n• Los IDs ingresados no existen\n• El nodo seleccionado es incorrecto\n• La ruta API ha cambiado";
         } else if (res.status === 422) {
-          userMessage += "\n\nRevisa:\n• El formato del archivo Excel\n• Las columnas requeridas\n• Los tipos de datos en cada columna";
+          userMessage +=
+            "\n\nRevisa:\n• El formato del archivo Excel\n• Las columnas requeridas\n• Los tipos de datos en cada columna";
         } else if (res.status === 500) {
-          userMessage += "\n\nEl servidor tuvo un problema interno. Intenta de nuevo o contacta al administrador.";
+          userMessage +=
+            "\n\nEl servidor tuvo un problema interno. Intenta de nuevo o contacta al administrador.";
         }
-        
+
         setError(userMessage);
+        toast.error(`Error ${res.status}: ${parsedError.description}`);
         throw new Error(text);
       }
 
+      // OK: intentar parsear JSON
       try {
         const jsonResult = JSON.parse(text);
         setResult(jsonResult);
-        
-        // Verificar si la respuesta tiene errores de productos
-        if (jsonResult.errors && jsonResult.errors.length > 0) {
+
+        // ✅ soporta {success}, {data:{n_products}}, {n_products}
+        const okCount = Number(
+          jsonResult?.success ??
+            jsonResult?.data?.n_products ??
+            jsonResult?.n_products ??
+            0
+        );
+
+        const errCount = Array.isArray(jsonResult?.errors)
+          ? jsonResult.errors.length
+          : 0;
+
+        if (errCount > 0) {
           setErrorDetails({
             type: "product_errors",
             description: "Errores en productos específicos",
             details: jsonResult.errors,
-            successCount: jsonResult.success || 0,
-            errorCount: jsonResult.errors.length
+            successCount: okCount,
+            errorCount: errCount,
           });
-          
-          setError(`⚠️ Se procesaron ${jsonResult.success || 0} productos, pero ${jsonResult.errors.length} tuvieron errores. Revisa los detalles abajo.`);
-        } else if (jsonResult.success) {
-          setError(`✅ Éxito: Se procesaron ${jsonResult.success} productos correctamente.`);
+
+          setError(
+            `⚠️ Se procesaron ${okCount} productos, pero ${errCount} tuvieron errores. Revisa los detalles abajo.`
+          );
+
+          toast.warning(`Procesado: ${okCount} OK, ${errCount} con error`);
+        } else {
+          // ✅ no pintar caja roja en éxito
+          setError("");
+          toast.success(`✅ Productos subidos: ${okCount}`);
         }
       } catch {
+        // Respuesta no-JSON (texto/HTML)
         setResult(text);
-        setError(`✅ Respuesta del servidor: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`);
+        setError(
+          `✅ Respuesta del servidor: ${text.substring(0, 100)}${
+            text.length > 100 ? "..." : ""
+          }`
+        );
+        toast.success("✅ Envío completado");
       }
     } catch (e) {
+      const msg = String(e?.message || "");
+
+      // Errores de red
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError")) {
+        const m =
+          "🌐 Error de conexión:\n\n• Verifica tu conexión a internet\n• El servidor del nodo podría estar caído\n• Revisa si hay problemas con CORS\n\nEndpoint: " +
+          buildEndpoint();
+
+        setError(m);
+        toast.error("🌐 Error de conexión con el servidor");
+        return;
+      }
+
       if (!errorDetails) {
-        const parsedError = parseError(e?.message || "Error desconocido");
+        const parsedError = parseError(msg || "Error desconocido");
         setErrorDetails(parsedError);
-        
-        // Mensajes para errores de red
-        if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
-          setError("🌐 Error de conexión:\n\n• Verifica tu conexión a internet\n• El servidor del nodo podría estar caído\n• Revisa si hay problemas con CORS\n\nEndpoint: " + buildEndpoint());
-        } else {
-          setError("❌ Error enviando el archivo: " + (e?.message || "Error desconocido"));
-        }
+      }
+
+      toast.error("❌ No se pudo enviar el Excel");
+
+      if (!error) {
+        setError("❌ Error enviando el archivo: " + (msg || "Error desconocido"));
       }
     } finally {
+      // ✅ SIEMPRE vuelve el botón a normal
       setLoading(false);
     }
   };
@@ -809,9 +1173,7 @@ export default function ExcelSender() {
 
                 <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                   <div>
-                    <div className="text-sm font-medium text-slate-900">
-                      flagUseSimpleBrand
-                    </div>
+                    <div className="text-sm font-medium text-slate-900">flagUseSimpleBrand</div>
                     <div className="text-xs text-slate-500">
                       Envía <span className="font-mono">true/false</span> al backend.
                     </div>
@@ -892,13 +1254,18 @@ export default function ExcelSender() {
                     <div className="flex-1">
                       <div className="text-sm font-semibold text-red-800">Mensaje</div>
                       <div className="mt-1 whitespace-pre-wrap text-sm text-red-700">{error}</div>
-                      
+
                       {/* Botón para copiar error */}
                       {errorDetails && (
                         <button
                           onClick={() => {
-                            const textToCopy = `Error: ${error}\n\nDetalles: ${JSON.stringify(errorDetails, null, 2)}\n\nEndpoint: ${buildEndpoint()}`;
+                            const textToCopy = `Error: ${error}\n\nDetalles: ${JSON.stringify(
+                              errorDetails,
+                              null,
+                              2
+                            )}\n\nEndpoint: ${buildEndpoint()}`;
                             navigator.clipboard.writeText(textToCopy);
+                            toast.success("Copiado al portapapeles");
                           }}
                           className="mt-2 inline-flex items-center gap-1 rounded-lg bg-red-100 px-3 py-1 text-xs font-medium text-red-800 hover:bg-red-200"
                         >
@@ -916,78 +1283,6 @@ export default function ExcelSender() {
                       )}
                     </div>
                   </div>
-
-                  {/* Detalles del error expandibles */}
-                  {errorDetails && (
-                    <div className="mt-4 border-t border-red-200 pt-4">
-                      <details className="group">
-                        <summary className="flex cursor-pointer items-center justify-between text-sm font-medium text-red-800">
-                          <span>Detalles técnicos del error</span>
-                          <svg className="h-4 w-4 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none">
-                            <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </summary>
-                        <div className="mt-2 rounded-lg bg-red-100 p-3">
-                          <div className="space-y-2 text-xs">
-                            {errorDetails.statusCode && (
-                              <div className="flex justify-between">
-                                <span className="font-medium">Código de estado:</span>
-                                <span className="font-mono">{errorDetails.statusCode} - {errorDetails.statusText}</span>
-                              </div>
-                            )}
-                            {errorDetails.type && (
-                              <div className="flex justify-between">
-                                <span className="font-medium">Tipo de error:</span>
-                                <span className="font-mono">{errorDetails.type}</span>
-                              </div>
-                            )}
-                            {errorDetails.description && (
-                              <div className="flex justify-between">
-                                <span className="font-medium">Descripción:</span>
-                                <span>{errorDetails.description}</span>
-                              </div>
-                            )}
-                            {errorDetails.successCount !== undefined && (
-                              <div className="flex justify-between">
-                                <span className="font-medium">Productos exitosos:</span>
-                                <span className="text-green-600">{errorDetails.successCount}</span>
-                              </div>
-                            )}
-                            {errorDetails.errorCount !== undefined && (
-                              <div className="flex justify-between">
-                                <span className="font-medium">Productos con error:</span>
-                                <span className="text-red-600">{errorDetails.errorCount}</span>
-                              </div>
-                            )}
-                            
-                            {/* Mostrar errores específicos de productos */}
-                            {errorDetails.details && Array.isArray(errorDetails.details) && (
-                              <div className="mt-3">
-                                <div className="font-medium">Errores por producto:</div>
-                                <div className="mt-1 max-h-40 overflow-y-auto">
-                                  {errorDetails.details.map((err, idx) => (
-                                    <div key={idx} className="mt-1 rounded border border-red-200 bg-white p-2">
-                                      <div className="font-mono text-xs">{JSON.stringify(err, null, 2)}</div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {/* Mostrar detalles del error crudo */}
-                            {errorDetails.details && typeof errorDetails.details === 'string' && (
-                              <div className="mt-3">
-                                <div className="font-medium">Mensaje original:</div>
-                                <div className="mt-1 rounded border border-red-200 bg-white p-2 font-mono text-xs">
-                                  {errorDetails.details}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </details>
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -998,9 +1293,7 @@ export default function ExcelSender() {
                   onClick={onSend}
                   disabled={!canSend}
                   className={`inline-flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-white transition md:w-auto ${
-                    canSend
-                      ? "bg-slate-900 hover:bg-slate-800"
-                      : "bg-slate-300 cursor-not-allowed"
+                    canSend ? "bg-slate-900 hover:bg-slate-800" : "bg-slate-300 cursor-not-allowed"
                   }`}
                 >
                   {loading ? (
@@ -1076,14 +1369,13 @@ export default function ExcelSender() {
                   <pre className="max-h-[560px] overflow-auto rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-800">
                     {typeof result === "string" ? result : JSON.stringify(result, null, 2)}
                   </pre>
-                  
-                  {/* Botón para copiar respuesta */}
+
                   <button
                     onClick={() => {
-                      const textToCopy = typeof result === "string" 
-                        ? result 
-                        : JSON.stringify(result, null, 2);
+                      const textToCopy =
+                        typeof result === "string" ? result : JSON.stringify(result, null, 2);
                       navigator.clipboard.writeText(textToCopy);
+                      toast.success("Respuesta copiada");
                     }}
                     className="mt-3 inline-flex items-center gap-1 rounded-lg bg-slate-100 px-3 py-1 text-xs font-medium text-slate-800 hover:bg-slate-200"
                   >
@@ -1105,14 +1397,14 @@ export default function ExcelSender() {
             </div>
           </div>
 
-          {/* Tips */}
           <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="text-sm font-semibold text-slate-900">Recomendaciones</div>
             <ul className="mt-3 space-y-2 text-sm text-slate-600">
               <li className="flex gap-2">
                 <Dot />
                 <span>
-                  Si el cliente tiene 1 sola tienda, deja <span className="font-mono">idWarehouse</span> vacío.
+                  Si el cliente tiene 1 sola tienda, deja{" "}
+                  <span className="font-mono">idWarehouse</span> vacío.
                 </span>
               </li>
               <li className="flex gap-2">
@@ -1129,9 +1421,7 @@ export default function ExcelSender() {
               </li>
               <li className="flex gap-2">
                 <Dot />
-                <span>
-                  Para errores 404, verifica que los IDs existen en el nodo correcto.
-                </span>
+                <span>Para errores 404, verifica que los IDs existen en el nodo correcto.</span>
               </li>
             </ul>
           </div>
@@ -1163,14 +1453,7 @@ function Field({ label, value, onChange, placeholder, helper }) {
 function Spinner() {
   return (
     <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="4"
-      />
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
       <path
         className="opacity-75"
         d="M4 12a8 8 0 0 1 8-8"
@@ -1200,9 +1483,7 @@ function EmptyState() {
           <path d="M15 3v5h5" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
         </svg>
       </div>
-      <div className="mt-3 text-sm font-semibold text-slate-900">
-        Sin resultados todavía
-      </div>
+      <div className="mt-3 text-sm font-semibold text-slate-900">Sin resultados todavía</div>
       <div className="mt-1 text-sm text-slate-600">
         Cuando envíes el Excel, aquí se mostrará la respuesta del servidor.
       </div>
